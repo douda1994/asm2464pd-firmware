@@ -24,7 +24,9 @@ On Debian/Ubuntu the toolchain can be installed with:
 sudo apt-get update
 sudo apt-get install -y sdcc make python3
 ```
+## Contributing
 
+Contributions are welcome! Feel free to open issues or pull requests.
 ### Build steps
 
 ```bash
