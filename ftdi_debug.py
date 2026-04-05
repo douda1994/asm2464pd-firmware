@@ -29,7 +29,7 @@ class USBGPUDebug:
     self.ftdi = Ftdi()
     self.ftdi.open_from_url(self.device_url)
     self.ftdi.set_baudrate(921600)
-    self.ftdi.set_line_property(8, 1, 'N')  # No parity (firmware disables it)
+    self.ftdi.set_line_property(8, 1, 'N')
 
     self.eeprom = FtdiEeprom()
     self.eeprom.connect(self.ftdi)
@@ -40,7 +40,6 @@ class USBGPUDebug:
       print("Warning: Device not provisioned for usbgpu debugging. Use --provision to provision it.")
       return
 
-    # setup gpio for reset control
     self.ftdi.set_cbus_direction(self.CBUS_RESET | self.CBUS_BOOTLOADER, self.CBUS_RESET | self.CBUS_BOOTLOADER)
     self.ftdi.set_cbus_gpio(0x00)
 
@@ -82,12 +81,52 @@ class USBGPUDebug:
       for vendor, device in SUPPORTED_CONTROLLERS:
         dev = usb.core.find(idVendor=vendor, idProduct=device)
         if dev is not None:
-          return  # Found it!
+          return
       time.sleep(0.1)
     raise RuntimeError(f"Bootloader did not enumerate within {timeout}s")
 
   def read(self) -> bytes:
     return self.ftdi.read_data(256).decode('utf-8', errors='replace')
+
+  # ===== NEW: status =====
+  def status(self):
+    """Display current device status."""
+    print("=" * 40)
+    print("       USB GPU Device Status")
+    print("=" * 40)
+    print(f"  Device URL   : {self.device_url}")
+    print(f"  Provisioned  : {'✅ Yes' if self.provisioned else '❌ No'}")
+
+    if self.provisioned:
+      print(f"  CBUS Func 1  : {self.eeprom.cbus_func_1}")
+      print(f"  CBUS Func 2  : {self.eeprom.cbus_func_2}")
+      print(f"  Baudrate     : 921600")
+      print(f"  GPIO RESET   : CBUS{2}")
+      print(f"  GPIO BOOT    : CBUS{1}")
+
+    # Check USB controllers
+    try:
+      import usb.core
+      SUPPORTED_CONTROLLERS = [
+        (0x174C, 0x2464, "ASM2464"),
+        (0x174C, 0x2463, "ASM2463"),
+        (0xADD1, 0x0001, "ADD1 Device"),
+      ]
+      print("\n  USB Controllers:")
+      found_any = False
+      for vendor, device, name in SUPPORTED_CONTROLLERS:
+        dev = usb.core.find(idVendor=vendor, idProduct=device)
+        if dev is not None:
+          print(f"    ✅ {name} (VID={hex(vendor)} PID={hex(device)}) - Connected")
+          found_any = True
+        else:
+          print(f"    ❌ {name} (VID={hex(vendor)} PID={hex(device)}) - Not found")
+      if not found_any:
+        print("    ⚠️  No supported USB controllers found!")
+    except ImportError:
+      print("  ⚠️  pyusb not installed — cannot check USB controllers")
+
+    print("=" * 40)
 
 
 if __name__ == "__main__":
@@ -98,6 +137,8 @@ if __name__ == "__main__":
   args.add_argument('--bootloader', '-b', action='store_true', default=False, help="Reset to bootloader")
   args.add_argument('--no-read', '-n', action='store_true', default=False, help="Do not read debug output")
   args.add_argument('--timeout', '-t', type=float, default=None, help="Timeout in seconds for reading")
+  # ===== NEW =====
+  args.add_argument('--status', '-s', action='store_true', default=False, help="Display current device status")
 
   args = args.parse_args()
 
@@ -105,13 +146,17 @@ if __name__ == "__main__":
     if args.provision:
       dbg.provision()
 
+    # ===== NEW =====
+    if args.status:
+      dbg.status()
+
     if args.reset:
       dbg.reset(bootloader=False)
 
     if args.bootloader:
       dbg.reset(bootloader=True)
 
-    if not args.no_read:
+    if not args.no_read and not args.status:
       print("Starting debug output. Press Ctrl-C to exit.\n------")
       start_time = time.perf_counter()
       while True:
@@ -120,4 +165,3 @@ if __name__ == "__main__":
         if args.timeout is not None and (time.perf_counter() - start_time) >= args.timeout:
           break
         time.sleep(0.001)
-
